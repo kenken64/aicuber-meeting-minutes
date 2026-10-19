@@ -1,0 +1,49 @@
+Meeting summary
+
+Quick recap
+The meeting focused on Kenneth demonstrating his AI-powered casino gaming system to Jackson and Lee. Kenneth showed how his AI can analyze and make predictions for baccarat and blackjack games, with the system capturing game data and providing percentage-based recommendations for betting decisions. He explained that the AI requires weekly retraining and uses a combination of his own programming with cloud-based AI services to function. The discussion also covered Kenneth's work on creating 3D avatars and graphical interfaces for his AI system, including challenges with using different formats and the limitations of current AI tools for 3D character control. The conversation touched on technical aspects of AI development, including the need for specific file formats and the constraints of current AI capabilities in controlling 3D models and animations.
+
+Next steps
+Jackson's
+Consider use cases for implementing an AI assistant (Javis) for his own needs.
+Kenneth
+Provide Lee with the URL and instructions to install the Chrome extension for the AI application.
+Integrate the graphical avatar (Jarvis) into the main application.
+Publish the game development tutorial and assets on a web platform.
+Lee
+Test the game development tutorial by following the steps and provide feedback.
+Summary
+AI Casino Gaming System Demo
+Kenneth demonstrated an AI-powered casino gaming system that can analyze and provide predictions for baccarat and blackjack games. He explained that the system requires weekly retraining and uses a combination of AI pattern recognition and human judgment, with the AI providing confidence percentages for betting decisions. The discussion revealed that while the AI can identify patterns and make recommendations, it's not guaranteed to be correct, and Kenneth relies on his own expertise to validate the AI's suggestions before making bets.
+
+AI Avatar Product Demo Discussion
+Kenneth demonstrated his AI avatar product to Lee and Jackson's, showing both graphical and voice-based interfaces. The team discussed technical challenges around voice communication and avatar customization, with Kenneth explaining his process of using photos of himself to create the female avatar version for board presentations. Kenneth acknowledged that while he had built individual components, he still needed to fully integrate all features together, particularly integrating Jarvis with the Google avatar system.
+
+AI-3D Modeling Workflow Integration Challenges
+The group discussed challenges with AI and 3D modeling workflows, particularly around file formats and control capabilities. Kenneth explained that while AI companies like ByteDance work with major 3D platforms including Unreal and Autodesk, they often lack proper workflow integration, requiring manual data preparation and specific file formats (like SVG or Unreal Tournament format) rather than standard video formats like MP4. The discussion also covered the need for tokens or subscriptions to access certain AI and graphics tools, with Lee mentioning that token usage could be limited and require payment to continue work.
+
+AI Image Processing Demonstration
+Kenneth demonstrated AI capabilities for image processing, specifically showing how to convert photos into cartoon style using GPT image 2.5 burst API. The team discussed technical challenges with file uploads and access permissions, with Kenneth emphasizing the need to handle files manually to avoid disrupting other projects. The demonstration included testing the AI conversion process and discussing potential applications, though some technical difficulties with file management were encountered during the session.
+
+AI Document Processing Discussion
+The team discussed using AI tools for document processing and translation. Kenneth explained how AI can help with coding and document analysis, suggesting that users should focus on providing clear instructions rather than trying to write complex code themselves. Jackson and Lee demonstrated the AI's ability to read and summarize documents, testing it with Chinese literature like "The Legend of the Condor Heroes" and "A Tale of Two Cities." The group explored using free PDF documents for testing the AI's translation and summarization capabilities, with Lee suggesting they find free Chinese documents for the AI to process.
+
+AI Capabilities and Content Adaptation
+The group discussed AI capabilities, particularly focusing on Google Gemini and its search functionality. Kenneth explained the difference between cached AI responses and research-based responses, noting that responses to frequently searched questions appear quickly, while more complex queries take longer. The conversation then shifted to creating a dramatic Hollywood-style adaptation of a Chinese book, with Kenneth agreeing to create a new PDF that would transform the story into a cinematic adventure with dramatic scenes and original illustrations. The conversation ended with a discussion about using AI to access and analyze legal case databases, though concerns were raised about security and password sharing.
+
+AI Security and Workplace Practices
+Kenneth explained techniques for protecting AI systems from context poisoning and PROM injection attacks, emphasizing the importance of carefully defining an AI assistant's capabilities and limitations. The discussion touched on workplace practices in China regarding maternity leave and employment laws, with Kenneth noting that performance appraisals can be manipulated to justify firing employees. The conversation ended with casual discussion about various topics including Elon Musk and workplace conditions.
+
+AI Game Design Education Platform
+Kenneth and Lee discussed their project to teach children how to build games using AI, which includes modules for creating characters, storylines, and game mechanics. They demonstrated how the platform allows users to design characters and environments, with AI generating assets and implementing features like item spawning and enemy behavior. The system can export projects for others to use, and Kenneth explained they are using OpenAI and image models to create polished game elements.
+
+AI Game Development Demonstration
+Kenneth demonstrated a game development project using AI to generate game assets and mechanics, including character movement and visual elements. The team discussed the quality and repetition of generated images, with Jackson noting that while the visual presentation was high quality, some elements were being reused across pages which weakened the storytelling. Kenneth emphasized that while AI can create impressive graphics quickly, certain elements like unique artwork for important moments still require human attention and effort.
+
+Video Game and AI Discussion
+Kenneth led a discussion about video game history and development, asking questions about classic games like Pong, Tetris, and Super Mario Bros. The conversation then shifted to discussing an AI codebase that Kenneth is working on, with Lee providing technical assistance about downloading and testing the project. Kenneth explained AI behavior patterns, particularly how AI models are intentionally "fine-tuned" to be less over-eager and more reliable for business purposes, similar to how over-eager employees might be managed.
+
+Chicken Illustration Copyright Concerns
+The group discussed concerns about an illustrated book, specifically focusing on why a chicken character was omitted from the illustrations. Lee explained that the artist was being cautious about copyright issues and was researching proper licensing. Jackson questioned the reasoning behind removing the chicken, and the discussion revealed that while the original story included a chicken, the written text didn't emphasize it significantly. The conversation also touched on the use of AI in content creation and the importance of proper attribution and licensing for creative works.
+
+Attendees: Kenneth Phang Tak Yan (Organizer), Lee (External), Jackson's iPhone (External)
