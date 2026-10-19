@@ -4,3 +4,13 @@ dist/
 test-results/
 playwright-report/
 .DS_Store
+
+.env*
+!.env.example
+.dev.vars*
+.wrangler/
+.vinext/
+.next/
+*.tsbuildinfo
+public/duckdb/
+public/pdfjs/
