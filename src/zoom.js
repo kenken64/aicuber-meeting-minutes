@@ -2,15 +2,53 @@ import { meetingCache, cacheState } from './meeting-cache.js';
 import { recordingWindows, mergeMeetings, transcriptToText } from './zoom-model.js';
 
 export function createZoomFeature({ esc, icon, badge, heading, redraw, toast, importTranscript, switchWorkspace, cacheUpdated }) {
-  const now = new Date(), yearAgo = new Date(now); yearAgo.setUTCFullYear(now.getUTCFullYear() - 1);
-  const state = { status: null, statusError: '', busy: false, error: '', meetings: [], recordings: [], from: yearAgo.toISOString().slice(0, 10), to: now.toISOString().slice(0, 10), tab: 'recordings', search: '', progress: '', scan: null, nextPage: '', loaded: false, retryAt: 0 };
-  let controller, generation = 0, workspaceKey, cacheKey;
+  const now = new Date(), recent = new Date(now); recent.setUTCDate(now.getUTCDate() - 27);
+  const state = { status: null, statusError: '', busy: false, error: '', meetings: [], recordings: [], from: recent.toISOString().slice(0, 10), to: now.toISOString().slice(0, 10), tab: 'recordings', search: '', progress: '', scan: null, nextPage: '', loaded: false, retryAt: 0 };
+  let controller, generation = 0, workspaceKey, cacheKey, nextRequestAt = 0;
   const paint = () => { if (location.hash.startsWith('#zoom')) redraw(); };
   async function request(path, options = {}) {
     const response = await fetch('/api/zoom/' + path, { credentials: 'same-origin', cache: 'no-store', ...options, headers: { ...(workspaceKey ? { 'X-Workspace-Key': workspaceKey } : {}), ...options.headers } });
     const data = await response.json();
-    if (!response.ok) { const error = new Error(data.error || 'Zoom could not complete this request.'); error.code = data.code; error.retryAfter = data.retryAfter; throw error; }
+    if (!response.ok) { const error = new Error(data.error || 'Zoom could not complete this request.'); error.code = data.code; error.retryAfter = data.retryAfter; error.rateLimitType = data.rateLimitType; throw error; }
     return data;
+  }
+  function pause(ms, signal) {
+    return new Promise((resolve, reject) => {
+      if (signal.aborted) { reject(new DOMException('Stopped', 'AbortError')); return; }
+      const abort = () => { clearTimeout(timer); signal.removeEventListener('abort', abort); reject(new DOMException('Stopped', 'AbortError')); };
+      const timer = setTimeout(() => { signal.removeEventListener('abort', abort); resolve(); }, Math.max(0, ms));
+      signal.addEventListener('abort', abort, { once: true });
+    });
+  }
+  async function pacedRequest(path, options, run) {
+    const signal = options.signal, progress = state.progress;
+    for (let attempt = 0; ; attempt++) {
+      await pause(Math.max(0, nextRequestAt - Date.now()), signal);
+      if (run !== generation) throw new DOMException('Stopped', 'AbortError');
+      nextRequestAt = Date.now() + 1500;
+      try { return await request(path, options); }
+      catch (error) {
+        if (run !== generation || signal.aborted) throw new DOMException('Stopped', 'AbortError');
+        if (error.code !== 'rate_limited') throw error;
+        const seconds = Number(error.retryAfter) > 0 ? Number(error.retryAfter) : 60;
+        const waitSeconds = seconds * 2 ** attempt;
+        if (error.retryAfter) state.retryAt = Date.now() + seconds * 1000;
+        if (error.rateLimitType === 'daily' || waitSeconds > 300 || attempt >= 3) {
+          if (error.rateLimitType === 'daily') error.message = 'Zoom’s daily API quota is exhausted.' + (error.retryAfter ? ` Try again after ${new Date(state.retryAt).toLocaleString()}.` : ' Try again after Zoom resets the quota.') + ' Retrieved results are kept.';
+          else error.message = 'Zoom is still limiting requests. Automatic retries are paused; retrieved results are kept.' + (error.retryAfter ? ` Try again after ${new Date(state.retryAt).toLocaleString()}.` : '');
+          state.progress = progress + ' · paused before this request completed';
+          throw error;
+        }
+        state.retryAt = Date.now() + waitSeconds * 1000;
+        while (Date.now() < state.retryAt) {
+          state.progress = `Zoom rate limit · retrying automatically in ${Math.ceil((state.retryAt - Date.now()) / 1000)}s · retry ${attempt + 1} of 3. ${progress}`;
+          paint();
+          await pause(Math.min(1000, state.retryAt - Date.now()), signal);
+          if (run !== generation) throw new DOMException('Stopped', 'AbortError');
+        }
+        state.retryAt = 0; state.progress = progress; paint();
+      }
+    }
   }
   async function loadStatus() {
     state.statusError = '';
@@ -53,7 +91,7 @@ export function createZoomFeature({ esc, icon, badge, heading, redraw, toast, im
         const window = scan.windows[scan.index];
         state.progress = `Searching ${window.from} to ${window.to} · window ${scan.index + 1} of ${scan.windows.length} · ${scan.results.length} recordings found`; paint();
         const query = new URLSearchParams({ ...window, pageToken: scan.token });
-        const data = await request('recordings?' + query, { signal: controller.signal }); if (run !== generation) return;
+        const data = await pacedRequest('recordings?' + query, { signal: controller.signal }, run); if (run !== generation) return;
         await cacheMeetings(data.meetings);
         scan.results = mergeMeetings(scan.results, data.meetings); state.recordings = scan.results; state.loaded = true;
         scan.pages++;
@@ -72,7 +110,8 @@ export function createZoomFeature({ esc, icon, badge, heading, redraw, toast, im
       do {
         const query = new URLSearchParams({ kind: kind === 'invited' ? 'invited' : 'scheduled', pageToken: token });
         state.progress = `Fetching ${kind === 'invited' ? 'upcoming & invited' : 'hosted'} meetings…`; paint();
-        const data = await request('meetings?' + query, { signal: controller.signal }); if (run !== generation) return;
+        state.nextPage = token;
+        const data = await pacedRequest('meetings?' + query, { signal: controller.signal }, run); if (run !== generation) return;
         await cacheMeetings(data.meetings);
         results = mergeMeetings(results, data.meetings); state.meetings = results; state.nextPage = data.nextPageToken; state.loaded = true; token = data.nextPageToken;
         if (token && seen.has(token)) throw new Error('Zoom repeated a page cursor. Results are incomplete; refresh to retry.');
@@ -97,7 +136,7 @@ export function createZoomFeature({ esc, icon, badge, heading, redraw, toast, im
         if(await meetingCache.read('minutes',id)){skipped++;continue;}
         state.progress=`Caching transcripts · ${saved+skipped+failed+1} of ${files.length}`;paint();
         try{
-          const data=await request('transcript',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({meetingUuid:meeting.uuid,fileId:file.id}),signal:controller.signal});
+          const data=await pacedRequest('transcript',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({meetingUuid:meeting.uuid,fileId:file.id}),signal:controller.signal},run);
           if(run!==generation)return;
           await meetingCache.saveMinutes({id,meetingId:'recording:'+meeting.uuid,title:data.title,text:transcriptToText(data.text)});saved++;cacheUpdated();
         }catch(error){if(['rate_limited','refresh_in_progress','reconnect_required','sign_in_required','connection_changed'].includes(error.code)||error.name==='AbortError')throw error;failed++;}
@@ -138,7 +177,7 @@ export function createZoomFeature({ esc, icon, badge, heading, redraw, toast, im
         <h2>Find your meeting minutes</h2>
         <p class="subtle-note">${esc(nextStep)}</p>
         <div class="zoom-tabs" role="group" aria-label="Meeting list">${[['recordings', 'Cloud recordings'], ['scheduled', 'Hosted meetings'], ['invited', 'Upcoming & invited']].map(([id, title]) => `<button class="button ${state.tab === id ? 'primary' : ''}" data-zoom-action="tab" data-tab="${id}" aria-pressed="${state.tab === id}" ${state.busy ? 'disabled' : ''}>${title}</button>`).join('')}</div>
-        ${state.tab === 'recordings' ? `<form id="zoom-dates" class="zoom-date-form"><label class="field"><span>From</span><input type="date" name="from" value="${state.from}" required ${disabled}/></label><label class="field"><span>Through</span><input type="date" name="to" value="${state.to}" required ${disabled}/></label><button class="button primary" ${disabled}>Fetch all in date range ${icon('download')}</button></form><p class="subtle-note">Searches every page in consecutive date windows, newest first. Choose earlier dates to look further back. Dates use UTC.</p>`
+        ${state.tab === 'recordings' ? `<form id="zoom-dates" class="zoom-date-form"><label class="field"><span>From</span><input type="date" name="from" value="${state.from}" required ${disabled}/></label><label class="field"><span>Through</span><input type="date" name="to" value="${state.to}" required ${disabled}/></label><button class="button primary" ${disabled}>Fetch all in date range ${icon('download')}</button></form><p class="subtle-note">Starts with the last 28 days. Choose earlier dates for older meetings. Requests are spaced out and short rate limits retry automatically. Keep this tab open during the scan. Dates use UTC.</p>`
           : `<div class="zoom-list-controls"><p>${state.tab === 'invited' ? 'Upcoming meetings in the next 24 hours, including invitations Zoom can access through your connected calendar.' : 'All valid scheduled meetings you host, including unexpired past meetings, live meetings, and upcoming meetings.'}</p><button class="button primary" data-zoom-action="fetch-all" ${disabled}>Fetch all pages</button><button class="button" data-zoom-action="refresh" ${disabled}>Refresh</button></div>`}
         <div class="zoom-progress" role="status" aria-live="polite"><span>${esc(canFetch ? state.progress || 'Your fetched meetings will appear below.' : 'Fetching is available after setup, workspace sign-in, and Zoom authorization.')}</span>${state.busy ? '<button class="button small" data-zoom-action="cancel">Stop</button>' : canFetch && state.scan && !state.error ? '<button class="button small" data-zoom-action="resume">Resume</button>' : ''}</div>
         ${state.tab === 'recordings' ? `<div class="cache-toolbar"><button class="button" data-zoom-action="cache-transcripts" ${state.busy || !canFetch || !readyTranscripts || cacheState.status !== 'ready' ? 'disabled' : ''}>${icon('download')}Cache available transcripts</button><a class="text-link" href="#cache">Open saved library ${icon('arrow')}</a></div><p class="subtle-note">${readyTranscripts && canFetch ? 'Save the available transcripts, then open Saved library to read them.' : 'The cache button becomes available when fetched recordings include completed transcripts.'}</p>` : ''}
@@ -163,7 +202,7 @@ export function createZoomFeature({ esc, icon, badge, heading, redraw, toast, im
     }
     if (action === 'import') {
       const run = start(); if (!run) return; paint();
-      try { const data = await request('transcript', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ meetingUuid: button.dataset.uuid, fileId: button.dataset.file }), signal: controller.signal }); if (run !== generation) return; const text = transcriptToText(data.text);
+      try { const data = await pacedRequest('transcript', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ meetingUuid: button.dataset.uuid, fileId: button.dataset.file }), signal: controller.signal }, run); if (run !== generation) return; const text = transcriptToText(data.text);
         if (cacheState.status === 'ready') { await meetingCache.saveMinutes({ id: 'zoom:' + button.dataset.uuid + ':' + button.dataset.file, meetingId: 'recording:' + button.dataset.uuid, title: data.title, text }); cacheUpdated(); }
         importTranscript({ title: data.title, startTime: data.startTime, text }); } catch (error) { if (run === generation) failure(error); } finally { if (run === generation) { state.busy = false; paint(); } }
     }

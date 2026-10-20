@@ -83,7 +83,21 @@ test('a refresh in another worker is not replayed',async()=>{
   const r=await req(env,'meetings',{headers:{'X-Workspace-Key':key}});assert.equal(r.status,409);assert.equal(r.headers.get('Retry-After'),'2');
 });
 test('rate limits preserve retry timing',async()=>{
-  const env=environment();const key=await connected(env);const r=await req(env,'meetings',{headers:{'X-Workspace-Key':key}},alice,async()=>reply({},429,{'Retry-After':'45'}));assert.equal(r.status,429);assert.equal(r.headers.get('Retry-After'),'45');
+  const env=environment();const key=await connected(env);const r=await req(env,'meetings',{headers:{'X-Workspace-Key':key}},alice,async()=>reply({},429,{'Retry-After':'45','X-RateLimit-Type':'QPS'}));assert.equal(r.status,429);assert.equal(r.headers.get('Retry-After'),'45');assert.equal((await r.json()).rateLimitType,'qps');
+});
+test('daily limits preserve reset dates and never invent a short retry when the reset is unknown',async()=>{
+  const env=environment();const key=await connected(env);const reset=new Date(Date.now()+3600000).toISOString();
+  const r=await req(env,'meetings',{headers:{'X-Workspace-Key':key}},alice,async()=>reply({},429,{'Retry-After':reset,'X-RateLimit-Type':'Daily-limit'}));
+  const data=await r.json();assert.equal(data.rateLimitType,'daily');assert.ok(data.retryAfter>3598&&data.retryAfter<=3600);assert.match(data.error,/daily API quota/);
+  const missing=await req(env,'meetings',{headers:{'X-Workspace-Key':key}},alice,async()=>reply({},429,{'X-RateLimit-Type':'Daily-limit'}));
+  assert.equal(missing.headers.get('Retry-After'),null);assert.equal((await missing.json()).retryAfter,undefined);
+});
+test('invalid retry headers get a conservative fallback and zero gets a minimum delay',async()=>{
+  const env=environment();const key=await connected(env);
+  for(const [value,expected] of [['not-a-date','60'],['0','1']]){
+    const r=await req(env,'meetings',{headers:{'X-Workspace-Key':key}},alice,async()=>reply({},429,{'Retry-After':value}));
+    assert.equal(r.headers.get('Retry-After'),expected);
+  }
 });
 test('transcript import verifies recording owner and never trusts a caller download URL',async()=>{
   const env=environment();const key=await connected(env);let calls=0;

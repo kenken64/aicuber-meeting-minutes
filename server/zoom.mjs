@@ -60,8 +60,13 @@ async function limitedText(response, maxBytes) {
 async function providerError(response) {
   if (response.status === 429) {
     const raw = response.headers.get('Retry-After');
-    const retry = Number(raw) || Math.ceil((Date.parse(raw) - Date.now()) / 1000) || 60;
-    return new ZoomError('Zoom’s rate limit was reached. Your results are kept; resume after the wait.', 429, 'rate_limited', Math.max(1, Math.min(retry, 86400)));
+    const kind = response.headers.get('X-RateLimit-Type')?.toLowerCase();
+    const daily = kind === 'daily-limit';
+    const parsed = raw?.trim() ? (/^\d+(?:\.\d+)?$/.test(raw.trim()) ? Number(raw) : (Date.parse(raw) - Date.now()) / 1000) : NaN;
+    const retry = Number.isFinite(parsed) ? Math.max(1, Math.ceil(parsed)) : daily ? 0 : 60;
+    const error = new ZoomError(daily ? 'Zoom’s daily API quota is exhausted. Try again after the quota resets.' : 'Zoom’s rate limit was reached. Your results are kept while the app waits to retry.', 429, 'rate_limited', retry);
+    error.rateLimitType = daily ? 'daily' : kind === 'qps' ? 'qps' : 'unknown';
+    return error;
   }
   if (response.status === 401) return new ZoomError('Your Zoom authorization expired or was revoked. Reconnect Zoom.', 401, 'reconnect_required');
   if (response.status === 403 || response.status === 400) return new ZoomError('Zoom did not allow this request. Check the app’s read scopes, account permissions, and cloud recording plan.', 403, 'zoom_access_denied');
@@ -237,6 +242,6 @@ export async function handleZoomRequest(request, env, user, fetcher = fetch) {
   } catch (error) {
     if (path === 'callback') return redirect('/?zoom_error=' + encodeURIComponent(error.code || 'connection_failed') + '#zoom', stateCookie('', 0));
     const known = error instanceof ZoomError;
-    return json({ error: known ? error.message : 'The Zoom connection could not complete this request. Please retry.', code: known ? error.code : 'server_error', ...(error.retryAfter ? { retryAfter: error.retryAfter } : {}) }, known ? error.status : 500, error.retryAfter ? { 'Retry-After': String(error.retryAfter) } : {});
+    return json({ error: known ? error.message : 'The Zoom connection could not complete this request. Please retry.', code: known ? error.code : 'server_error', ...(error.retryAfter ? { retryAfter: error.retryAfter } : {}), ...(error.rateLimitType ? { rateLimitType: error.rateLimitType } : {}) }, known ? error.status : 500, error.retryAfter ? { 'Retry-After': String(error.retryAfter) } : {});
   }
 }

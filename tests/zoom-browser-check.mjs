@@ -10,6 +10,7 @@ const ready=async()=>{await page.getByText('DuckDB · saved on this device',{exa
 try{
  await go('zoom');await page.getByRole('link',{name:/Open the Zoom setup guide/}).waitFor();
  await page.getByRole('button',{name:'Cloud recordings',exact:true}).waitFor();
+ assert.equal(Date.parse(await page.locator('#zoom-dates [name="to"]').inputValue())-Date.parse(await page.locator('#zoom-dates [name="from"]').inputValue()),27*86400000);
  assert.equal(await page.getByRole('button',{name:/Fetch all in date range/}).isDisabled(),true);
  assert.equal(await page.getByRole('button',{name:'Cache available transcripts',exact:true}).isDisabled(),true);
  await page.getByRole('button',{name:'Hosted meetings',exact:true}).click();
@@ -27,12 +28,13 @@ try{
  await page.locator('.cache-item').filter({hasText:'Private local review.txt · Analysis'}).getByRole('button',{name:'Open',exact:true}).click();
  await page.getByRole('button',{name:'Open in workspace',exact:true}).click();await page.getByRole('heading',{name:'2 extracted action candidates'}).waitFor();
  console.log('Real DuckDB OPFS: seeded full source data, cached uploaded minutes and analysis, survived reload, reopened analysis.');
- let account='account-a',recordingCalls=0,transcriptCalls=0,rateLimited=false,authenticated=false,zoomConnected=false;
+ let account='account-a',recordingCalls=0,transcriptCalls=0,rateLimited=false,authenticated=false,zoomConnected=false,rateMode='once';
+ const recordingRequests=[];
  const records=[{id:'111',uuid:'instance-a',topic:'Team review <img src=x onerror=alert(1)>',startTime:'2026-10-14T14:05:00Z',duration:40,kind:'recording',files:[{id:'fa',status:'completed'}],url:null},{id:'111',uuid:'instance-b',topic:'Team review, second occurrence',startTime:'2026-10-13T14:05:00Z',duration:30,kind:'recording',files:[{id:'fb',status:'completed'}],url:null}];
  await context.route('**/api/zoom/**',async route=>{
    const url=new URL(route.request().url());const respond=(body,status=200)=>route.fulfill({status,contentType:'application/json',body:JSON.stringify(body)});
    if(url.pathname.endsWith('/status'))return respond({configured:true,authenticated,connected:zoomConnected,profile:zoomConnected?{name:account,email:account+'@example.invalid'}:null,workspaceKey:zoomConnected?'workspace-'+account:null,cacheKey:authenticated?account:null,signInPath:'/signin-with-chatgpt?return_to=%2F%23zoom',signOutPath:'/signout-with-chatgpt?return_to=%2F%23zoom'});
-   if(url.pathname.endsWith('/recordings')){recordingCalls++;if(url.searchParams.get('pageToken')==='second'&&!rateLimited){rateLimited=true;return respond({error:'Fixture rate limit',code:'rate_limited',retryAfter:1},429);}if(url.searchParams.get('pageToken')==='second')return respond({meetings:[records[1]],nextPageToken:''});return respond({meetings:[records[0]],nextPageToken:'second'});}
+   if(url.pathname.endsWith('/recordings')){recordingCalls++;recordingRequests.push({time:Date.now(),token:url.searchParams.get('pageToken'),from:url.searchParams.get('from'),to:url.searchParams.get('to')});if(rateMode==='daily')return respond({error:'Fixture daily limit',code:'rate_limited',rateLimitType:'daily',retryAfter:3600},429);if(rateMode==='always')return respond({error:'Fixture repeated limit',code:'rate_limited',rateLimitType:'qps',retryAfter:1},429);if(url.searchParams.get('pageToken')==='second'&&!rateLimited){rateLimited=true;return respond({error:'Fixture rate limit',code:'rate_limited',rateLimitType:'qps',retryAfter:2},429);}if(url.searchParams.get('pageToken')==='second')return respond({meetings:[records[1]],nextPageToken:''});return respond({meetings:[records[0]],nextPageToken:'second'});}
    if(url.pathname.endsWith('/transcript')){transcriptCalls++;return respond({title:'Zoom '+JSON.parse(route.request().postData()).fileId,startTime:'2026-10-14',text:'WEBVTT\n\n1\n00:00:01.000 --> 00:00:02.000\nAlice: Keep every word. 中文\n'});}
    if(url.pathname.endsWith('/meetings'))return respond({meetings:[{...records[0],kind:'meeting',files:[]}],nextPageToken:''});
    return respond({error:'Unexpected fixture request'},400);
@@ -50,15 +52,35 @@ try{
  await go('cache');await ready();assert.equal(await page.locator('.cache-item').count(),3);assert.equal(await page.getByText('Private local review.txt · Analysis',{exact:true}).count(),0);
  await page.getByRole('link',{name:'Zoom meetings',exact:true}).click();await page.getByText('Zoom connected',{exact:true}).waitFor();
  await page.locator('#zoom-dates [name="from"]').fill('2026-10-01');await page.locator('#zoom-dates [name="to"]').fill('2026-10-20');
- await page.getByRole('button',{name:/Fetch all in date range/}).click();await page.getByText('Fixture rate limit',{exact:false}).waitFor();assert.equal(await page.locator('.zoom-meeting').count(),1);
- await page.waitForTimeout(1100);await page.getByRole('button',{name:'Resume search',exact:true}).click();await page.getByText(/Search complete · 2 available recordings/).waitFor();assert.equal(await page.locator('.zoom-meeting').count(),2);assert.equal(await page.locator('.zoom-meeting img').count(),0);
+ await page.getByRole('button',{name:/Fetch all in date range/}).click();await page.getByText(/Zoom rate limit · retrying automatically/).waitFor();assert.equal(await page.locator('.zoom-meeting').count(),1);
+ await page.getByText(/Search complete · 2 available recordings/).waitFor();assert.equal(await page.locator('.zoom-meeting').count(),2);assert.equal(await page.locator('.zoom-meeting img').count(),0);
+ assert.deepEqual(recordingRequests.map(r=>r.token),['','second','second']);
+ assert.equal(recordingRequests[1].from,recordingRequests[2].from);assert.equal(recordingRequests[1].to,recordingRequests[2].to);
+ assert.ok(recordingRequests[1].time-recordingRequests[0].time>=1400,'Requests are spaced out');
+ assert.ok(recordingRequests[2].time-recordingRequests[1].time>=1900,'Zoom retry delay is respected');
  await page.getByRole('button',{name:'Cache available transcripts',exact:true}).click();await page.getByText(/Transcript cache complete · 2 saved/).waitFor();assert.equal(transcriptCalls,2);
  await page.getByRole('button',{name:'Cache available transcripts',exact:true}).click();await page.getByText(/Transcript cache complete · 0 saved · 2 already cached/).waitFor();assert.equal(transcriptCalls,2);
  await page.getByRole('link',{name:'Saved library',exact:true}).click();await ready();await page.getByRole('heading',{name:'Zoom fa',exact:true}).waitFor();
  await page.locator('.cache-item').filter({has:page.getByRole('heading',{name:'Zoom fa',exact:true})}).getByRole('button',{name:'Open',exact:true}).click();assert.ok((await page.locator('.cache-detail').innerText()).includes('[00:00:01.000] Alice: Keep every word. 中文'));
  await page.reload();await ready();assert.equal(await page.locator('.cache-item').count(),7);
  await page.getByRole('link',{name:'Zoom meetings',exact:true}).click();await page.locator('.zoom-meeting').first().waitFor();assert.equal(await page.locator('.zoom-meeting').count(),2);assert.equal(recordingCalls,3);
- console.log('Mock Zoom: paginated sync, 429 resume, recurring-instance deduplication, bulk transcript caching, cache hits, escaped provider text, and cached meeting reopen passed.');
+ console.log('Mock Zoom: paced requests, automatic 429 retry at the same cursor, recurring-instance deduplication, bulk transcript caching, cache hits, escaped provider text, and cached meeting reopen passed.');
+ rateLimited=false;
+ await page.locator('#zoom-dates [name="from"]').fill('2026-10-01');await page.locator('#zoom-dates [name="to"]').fill('2026-10-20');
+ await page.getByRole('button',{name:/Fetch all in date range/}).click();await page.getByText(/Zoom rate limit · retrying automatically/).waitFor();
+ const beforeStop=recordingCalls;await page.getByRole('button',{name:'Stop',exact:true}).click();await page.waitForTimeout(2200);
+ assert.equal(recordingCalls,beforeStop,'Stop cancels the automatic retry');
+ await page.getByRole('button',{name:'Resume',exact:true}).click();await page.getByText(/Search complete · 2 available recordings/).waitFor();
+ assert.equal(recordingRequests.at(-1).token,'second');
+ rateMode='always';const beforeRepeated=recordingCalls;
+ await page.getByRole('button',{name:/Fetch all in date range/}).click();await page.getByText(/Automatic retries are paused/).waitFor();
+ assert.equal(recordingCalls-beforeRepeated,4,'Repeated limits stop after three automatic retries');
+ await page.waitForTimeout(1200);assert.equal(recordingCalls-beforeRepeated,4);
+ rateMode='daily';await page.getByRole('button',{name:/Fetch all in date range/}).click();await page.getByText(/daily API quota is exhausted/).waitFor();
+ const dailyCalls=recordingCalls;await page.waitForTimeout(2200);assert.equal(recordingCalls,dailyCalls,'Daily quota does not trigger short retries');
+ assert.equal(await page.getByRole('button',{name:'Stop',exact:true}).count(),0);
+ assert.equal(await page.locator('.zoom-meeting').count(),2,'Daily limit keeps existing results');
+ console.log('Stopping the countdown prevents retries; resume keeps its cursor; daily quotas pause without repeated calls.');
  account='account-b';await go('cache');await ready();assert.equal(await page.locator('.cache-item').count(),3);assert.equal(await page.getByRole('heading',{name:'Zoom fa',exact:true}).count(),0);
  account='account-a';await page.reload();await ready();assert.equal(await page.locator('.cache-item').count(),7);
  const download=page.waitForEvent('download');await page.getByRole('button',{name:'Export cache',exact:true}).click();assert.equal((await download).suggestedFilename(),'minutes-browser-cache.json');
