@@ -24,6 +24,19 @@ test('setup required is honest; no credentials or tokens are returned',async()=>
   const r=await req({},'status',{},null);assert.equal(r.status,200);assert.equal((await r.json()).configured,false);
   assert.equal((await req({},'meetings')).status,503);
 });
+test('setup diagnostics identify missing and malformed settings without revealing values',async()=>{
+  const env=environment();
+  assert.deepEqual((await (await req(env,'status',{},null)).json()).setupIssues,[]);
+  env.ZOOM_TOKEN_KEY='invalid-private-encryption-value';
+  env.APP_ORIGIN='not-a-url-private-value';
+  const status=await (await req(env,'status',{},null)).json();
+  assert.equal(status.configured,false);
+  assert.deepEqual(status.setupIssues.map(issue=>issue.key),['APP_ORIGIN','ZOOM_TOKEN_KEY']);
+  for(const key of ['ZOOM_CLIENT_ID','ZOOM_CLIENT_SECRET','ZOOM_TOKEN_KEY','APP_ORIGIN']) assert.ok(!JSON.stringify(status).includes(env[key]));
+  delete env.ZOOM_CLIENT_ID;
+  assert.ok((await (await req(env,'status',{},null)).json()).setupIssues.some(issue=>issue.key==='ZOOM_CLIENT_ID'));
+  assert.equal((await req(env,'connect',{method:'POST'})).status,503);
+});
 test('OAuth requires identity and same-origin POST',async()=>{
   const env=environment();assert.equal((await req(env,'connect',{method:'POST'},null)).status,401);
   assert.equal((await req(env,'connect',{method:'POST',headers:{Origin:'https://evil.test'}})).status,403);

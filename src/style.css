@@ -123,3 +123,8 @@ input,select,textarea,.filter-bar select{font-size:16px}
 .section-title>div{min-width:0;flex:1 1 230px}
 .section-title p,.analysis-result h3,.zoom-how p,.zoom-account p{overflow-wrap:anywhere}
 .search-results strong{overflow-wrap:anywhere}
+.zoom-setup-issues{padding-left:22px;margin:16px 0;line-height:1.7;overflow-wrap:anywhere}
+.zoom-setup-issues li+li{margin-top:8px}
+.zoom-library>h2{margin-bottom:6px}
+.zoom-library>.subtle-note{margin-bottom:16px}
+.zoom-library button:disabled,.zoom-library input:disabled{cursor:not-allowed}

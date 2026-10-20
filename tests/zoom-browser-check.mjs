@@ -9,6 +9,13 @@ const go=async route=>{await page.goto(base+'/?check='+ ++navigation +'#'+route)
 const ready=async()=>{await page.getByText('DuckDB · saved on this device',{exact:true}).waitFor({timeout:60000});await page.locator('.cache-item').first().waitFor();};
 try{
  await go('zoom');await page.getByRole('link',{name:/Open the Zoom setup guide/}).waitFor();
+ await page.getByRole('button',{name:'Cloud recordings',exact:true}).waitFor();
+ assert.equal(await page.getByRole('button',{name:/Fetch all in date range/}).isDisabled(),true);
+ assert.equal(await page.getByRole('button',{name:'Cache available transcripts',exact:true}).isDisabled(),true);
+ await page.getByRole('button',{name:'Hosted meetings',exact:true}).click();
+ assert.equal(await page.getByRole('button',{name:'Fetch all pages',exact:true}).isDisabled(),true);
+ for(const width of [390,320]){await page.setViewportSize({width,height:900});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'Setup overflow at '+width);}
+ await page.setViewportSize({width:1440,height:1000});
  await go('cache');await ready();assert.equal(await page.locator('.cache-item').count(),3);
  await page.screenshot({path:'../.work/duckdb-library.png'});
  await page.getByRole('link',{name:'Analyze new files'}).click();
@@ -20,16 +27,26 @@ try{
  await page.locator('.cache-item').filter({hasText:'Private local review.txt · Analysis'}).getByRole('button',{name:'Open',exact:true}).click();
  await page.getByRole('button',{name:'Open in workspace',exact:true}).click();await page.getByRole('heading',{name:'2 extracted action candidates'}).waitFor();
  console.log('Real DuckDB OPFS: seeded full source data, cached uploaded minutes and analysis, survived reload, reopened analysis.');
- let account='account-a',recordingCalls=0,transcriptCalls=0,rateLimited=false;
+ let account='account-a',recordingCalls=0,transcriptCalls=0,rateLimited=false,authenticated=false,zoomConnected=false;
  const records=[{id:'111',uuid:'instance-a',topic:'Team review <img src=x onerror=alert(1)>',startTime:'2026-10-14T14:05:00Z',duration:40,kind:'recording',files:[{id:'fa',status:'completed'}],url:null},{id:'111',uuid:'instance-b',topic:'Team review, second occurrence',startTime:'2026-10-13T14:05:00Z',duration:30,kind:'recording',files:[{id:'fb',status:'completed'}],url:null}];
  await context.route('**/api/zoom/**',async route=>{
    const url=new URL(route.request().url());const respond=(body,status=200)=>route.fulfill({status,contentType:'application/json',body:JSON.stringify(body)});
-   if(url.pathname.endsWith('/status'))return respond({configured:true,authenticated:true,connected:true,profile:{name:account,email:account+'@example.invalid'},workspaceKey:'workspace-'+account,cacheKey:account,signOutPath:'/signout-with-chatgpt?return_to=%2F%23zoom'});
+   if(url.pathname.endsWith('/status'))return respond({configured:true,authenticated,connected:zoomConnected,profile:zoomConnected?{name:account,email:account+'@example.invalid'}:null,workspaceKey:zoomConnected?'workspace-'+account:null,cacheKey:authenticated?account:null,signInPath:'/signin-with-chatgpt?return_to=%2F%23zoom',signOutPath:'/signout-with-chatgpt?return_to=%2F%23zoom'});
    if(url.pathname.endsWith('/recordings')){recordingCalls++;if(url.searchParams.get('pageToken')==='second'&&!rateLimited){rateLimited=true;return respond({error:'Fixture rate limit',code:'rate_limited',retryAfter:1},429);}if(url.searchParams.get('pageToken')==='second')return respond({meetings:[records[1]],nextPageToken:''});return respond({meetings:[records[0]],nextPageToken:'second'});}
    if(url.pathname.endsWith('/transcript')){transcriptCalls++;return respond({title:'Zoom '+JSON.parse(route.request().postData()).fileId,startTime:'2026-10-14',text:'WEBVTT\n\n1\n00:00:01.000 --> 00:00:02.000\nAlice: Keep every word. 中文\n'});}
    if(url.pathname.endsWith('/meetings'))return respond({meetings:[{...records[0],kind:'meeting',files:[]}],nextPageToken:''});
    return respond({error:'Unexpected fixture request'},400);
  });
+ await go('zoom');await page.getByRole('link',{name:/Sign in to workspace/}).waitFor();
+ assert.equal(await page.getByRole('button',{name:/Fetch all in date range/}).isDisabled(),true);
+ authenticated=true;await page.getByRole('button',{name:'Check connection again',exact:true}).click();
+ await page.getByRole('button',{name:/Connect with Zoom/}).waitFor();
+ assert.equal(await page.getByRole('button',{name:/Fetch all in date range/}).isDisabled(),true);
+ zoomConnected=true;await page.getByRole('button',{name:'Check connection again',exact:true}).click();
+ await page.getByText('Zoom connected',{exact:true}).waitFor();
+ assert.equal(await page.getByRole('button',{name:/Fetch all in date range/}).isDisabled(),false);
+ assert.equal(recordingCalls,0);
+ console.log('Meeting controls stay visible through setup, sign-in, and Zoom connection; fetching is enabled only when authorized.');
  await go('cache');await ready();assert.equal(await page.locator('.cache-item').count(),3);assert.equal(await page.getByText('Private local review.txt · Analysis',{exact:true}).count(),0);
  await page.getByRole('link',{name:'Zoom meetings',exact:true}).click();await page.getByText('Zoom connected',{exact:true}).waitFor();
  await page.locator('#zoom-dates [name="from"]').fill('2026-10-01');await page.locator('#zoom-dates [name="to"]').fill('2026-10-20');

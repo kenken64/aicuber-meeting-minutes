@@ -28,9 +28,22 @@ export async function unseal(value, env, ownerId) {
   const [iv, cipher] = value.split('.');
   return JSON.parse(decoder.decode(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unbase64(iv), additionalData: encoder.encode(ownerId) }, await encryptionKey(env), unbase64(cipher))));
 }
-function configured(env) {
-  try { return !!(env.ZOOM_CLIENT_ID && env.ZOOM_CLIENT_SECRET && env.APP_ORIGIN && env.DB && unbase64(env.ZOOM_TOKEN_KEY).length === 32 && new URL(env.APP_ORIGIN).protocol === 'https:'); } catch { return false; }
+function configurationIssues(env) {
+  const issues = [];
+  for (const key of ['ZOOM_CLIENT_ID', 'ZOOM_CLIENT_SECRET', 'APP_ORIGIN', 'ZOOM_TOKEN_KEY', 'DB']) {
+    if (!env[key]) issues.push({ key, message: key === 'DB' ? 'The meeting database is not connected to this deployment.' : `${key} is missing from the deployed server settings.` });
+  }
+  if (env.APP_ORIGIN) {
+    try { if (new URL(env.APP_ORIGIN).protocol !== 'https:') throw new Error(); }
+    catch { issues.push({ key: 'APP_ORIGIN', message: 'APP_ORIGIN must be the site’s HTTPS address.' }); }
+  }
+  if (env.ZOOM_TOKEN_KEY) {
+    try { if (unbase64(env.ZOOM_TOKEN_KEY).length !== 32) throw new Error(); }
+    catch { issues.push({ key: 'ZOOM_TOKEN_KEY', message: 'ZOOM_TOKEN_KEY must be a base64url-encoded 32-byte encryption key. It is separate from the Zoom credentials.' }); }
+  }
+  return issues;
 }
+function configured(env) { return configurationIssues(env).length === 0; }
 function origin(env) { return new URL(env.APP_ORIGIN).origin; }
 function requireOrigin(request, env) { if (request.headers.get('Origin') !== origin(env)) throw new ZoomError('This request must come from your meeting workspace.', 403, 'invalid_origin'); }
 function requireUser(user) { if (!user?.userId) throw new ZoomError('Sign in to your workspace before connecting Zoom.', 401, 'sign_in_required'); }
@@ -153,7 +166,7 @@ export async function handleZoomRequest(request, env, user, fetcher = fetch) {
     if (path === 'webhook') return await webhook(request, env);
     if (path === 'status' && request.method === 'GET') {
       const row = user?.userId && configured(env) ? await connection(env, user.userId) : null;
-      return json({ configured: configured(env), authenticated: !!user?.userId, visitor: user?.userId ? { name: user.displayName || user.email || 'Your workspace', email: user.email || '' } : null, connected: !!row, signInPath: '/signin-with-chatgpt?return_to=%2F%23zoom', signOutPath: '/signout-with-chatgpt?return_to=%2F%23zoom', profile: row ? { name: row.display_name, email: row.email } : null, cacheKey: user?.userId ? await hash('cache:' + user.userId + (row ? ':' + row.zoom_user_id : '')) : null, workspaceKey: row ? await hash(user.userId + ':' + row.zoom_user_id) : null });
+      return json({ configured: configured(env), setupIssues: configurationIssues(env), authenticated: !!user?.userId, visitor: user?.userId ? { name: user.displayName || user.email || 'Your workspace', email: user.email || '' } : null, connected: !!row, signInPath: '/signin-with-chatgpt?return_to=%2F%23zoom', signOutPath: '/signout-with-chatgpt?return_to=%2F%23zoom', profile: row ? { name: row.display_name, email: row.email } : null, cacheKey: user?.userId ? await hash('cache:' + user.userId + (row ? ':' + row.zoom_user_id : '')) : null, workspaceKey: row ? await hash(user.userId + ':' + row.zoom_user_id) : null });
     }
     if (!configured(env)) throw new ZoomError('The site owner needs to finish the Zoom app setup before accounts can connect.', 503, 'setup_required');
     requireUser(user);
