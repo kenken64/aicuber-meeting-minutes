@@ -14,17 +14,11 @@ WORKDIR /app
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
     HOSTNAME=0.0.0.0 \
-    PORT=3000 \
-    MINUTES_DB_PATH=/data/minutes.sqlite
+    PORT=3000
 
-# Railway mounts volumes as root. Drop privileges after preparing the DB path.
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends gosu \
-    && rm -rf /var/lib/apt/lists/*
 COPY --from=builder --chown=node:node /app/.next/standalone ./
 COPY --from=builder --chown=node:node /app/.next/static ./.next/static
 COPY --from=builder --chown=node:node /app/public ./public
-COPY --chmod=755 scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint
 EXPOSE 3000
-ENTRYPOINT ["docker-entrypoint"]
+USER node
 CMD ["node", "server.js"]

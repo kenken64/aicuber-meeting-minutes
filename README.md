@@ -37,7 +37,7 @@ Source PDFs include author Ursula Nafula, illustrator Catherine Groenewald and C
 
 The five supplied sources are bundled with the site and retain its existing audience. Tracker edits use account-scoped browser storage; use its JSON backup to move changes across browsers. Meeting content and analysis caches use DuckDB-Wasm 1.32.0 in OPFS, with checkpoints after writes and an exclusive browser lock for each account database. DuckDB is pinned because the npm `latest` version tested during development did not persist OPFS writes across reloads. The engine and worker are served from this app; its compressed engine is unpacked locally before instantiation.
 
-Zoom credentials and encrypted user tokens live only in the server environment/D1. The app preserves Sites sign-in as workspace identity and uses Zoom as the connected data provider. OAuth credentials still need to be supplied before live sign-in can work. Zoom imports require read permissions and available cloud transcripts. No general-purpose AI API or OCR service is configured.
+Zoom connections are managed centrally by 2ndBrain. Users keep their original 2ndBrain login and connect Zoom separately through its Supabase provider. Meeting Minutes calls a restricted server-to-server integration API; Zoom credentials and provider tokens remain in 2ndBrain. Connection changes apply to subsequent requests without restarting Meeting Minutes. Zoom imports require read permissions and available cloud transcripts. No general-purpose AI API or OCR service is configured.
 
 The browser cache is device-local, can be evicted by the browser, and is not cross-device synchronization. Export it before clearing browser data. A cached item can be opened without refetching Zoom while its workspace is available; this is not an offline service worker/PWA. Fonts load from Google Fonts with local fallbacks.
 
@@ -57,44 +57,40 @@ Zoom server logic is in `server/zoom.mjs`; the browser database is in `src/meeti
 
 ## Railway and AI CUBER marketplace
 
-Deploy this repository as a separate Railway service. `railway.json` selects the multi-stage `Dockerfile`, which builds Next.js standalone output on Node 22.23.1 and packages the server, static assets, DuckDB engine, and PDF.js worker. The container listens on `0.0.0.0` and Railway's `PORT` (default `3000`). It prepares SQLite directory permissions at startup, then runs Node as the unprivileged `node` user. Configuration and secrets are supplied at runtime; `.dockerignore` excludes local environment files, databases, and build artifacts.
+`railway.json` selects the multi-stage `Dockerfile`. It builds Next.js standalone output on Node 22.23.1, packages static assets, DuckDB and PDF.js workers, and runs as the unprivileged `node` user. The server binds to `0.0.0.0` and Railway’s `PORT` (default `3000`). `/api/health` is an unauthenticated process health check. Local environment files and build artifacts are excluded from the image.
 
-1. Push these changes to GitHub, then create a Railway service from `kenken64/aicuber-meeting-minutes`, with this app directory as its root (the repository root in this repo).
-2. Attach a persistent Railway volume mounted at `/data`. Use one replica; `railway.json` sets this explicitly.
-3. Set the variables listed below and generate a public Railway domain. Set `APP_ORIGIN` and Zoom URLs to that domain.
-4. Deploy using the Dockerfile's default entrypoint and command. Clear any old custom build/start commands in the Railway service settings. Railway checks `/api/health`, which returns `200` when the server can initialize and query SQLite, or `503` when storage is unavailable. It does not require marketplace login or Zoom credentials.
-5. Open the app from AI CUBER Marketplace to verify a real signed launch, then connect Zoom.
+Set these runtime variables on Meeting Minutes:
 
-Zoom connections and OAuth state are stored in SQLite at `/data/minutes.sqlite`. Back up the volume and retain the encryption key: replacing either loses access to existing connections. Browser meeting caches remain device-local. This SQLite setup is for a single replica, not multiple instances sharing a database.
+```dotenv
+APP_ORIGIN=https://YOUR-MINUTES-DOMAIN
+MEETING_MINUTES_SESSION_SECRET=MATCHING_RANDOM_SECRET_AT_LEAST_32_BYTES
+MARKETPLACE_LAUNCH_VERIFY_URL=https://YOUR-2NDBRAIN-DOMAIN/api/marketplace/launch-session/verify
+MARKETPLACE_LAUNCH_VERIFY_SECRET=MATCHING_DIFFERENT_RANDOM_SECRET_AT_LEAST_32_BYTES
+```
 
-Set these Railway variables on the minutes service:
+No Zoom environment variables or persistent server volume are required here. Zoom settings, encrypted credentials, tokens, refreshes and optional webhooks live in 2ndBrain. The browser DuckDB library remains device-local. Legacy Sites/server Zoom modules are retained for source compatibility; the Railway API routes use the central integration service exclusively.
 
-- `APP_ORIGIN`: its public HTTPS origin, without a trailing slash (for example `https://minutes.up.railway.app`).
-- `MEETING_MINUTES_SESSION_SECRET`: a random secret of at least 32 bytes, shared with AI CUBER.
-- `MARKETPLACE_LAUNCH_VERIFY_URL`: `https://YOUR-2NDBRAIN-DOMAIN/api/marketplace/launch-session/verify`.
-- `MARKETPLACE_LAUNCH_VERIFY_SECRET`: the same random secret of at least 32 bytes configured on AI CUBER.
-- `MINUTES_DB_PATH`: `/data/minutes.sqlite`.
-- `ZOOM_CLIENT_ID`, `ZOOM_CLIENT_SECRET`, `ZOOM_TOKEN_KEY`, and optionally `ZOOM_WEBHOOK_SECRET`: see [Zoom setup](docs/ZOOM_SETUP.md). Generate `ZOOM_TOKEN_KEY` with `node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))"` and keep it stable. Configure Zoom's redirect URL as `https://YOUR-MINUTES-DOMAIN/api/zoom/callback` and its webhook URL as `https://YOUR-MINUTES-DOMAIN/api/zoom/webhook` if using webhooks.
+On 2ndBrain set `MEETING_MINUTES_URL=https://YOUR-MINUTES-DOMAIN/api/2ndbrain/launch` and the matching session/verification secrets. Deploy its central Zoom integration, apply migration `0038_zoom_connections.sql`, enable the Supabase Zoom provider and manual identity linking, and configure its dedicated callback allow list. Its administrator enters the shared Zoom app credentials in Marketplace → Zoom for API token refresh. See [Zoom setup](docs/ZOOM_SETUP.md).
 
-On AI CUBER, set `MEETING_MINUTES_URL` to `https://YOUR-MINUTES-DOMAIN/api/2ndbrain/launch`, set `MEETING_MINUTES_SESSION_SECRET` to the matching value, and configure `MARKETPLACE_LAUNCH_VERIFY_SECRET`. Deploy the marketplace changes as well. Users install Meeting Minutes in Marketplace and launch it from My Workflows. Sessions last up to eight hours and are checked against AI CUBER for logout, disabled accounts, and uninstall; if verification is unavailable, access fails closed. Zoom OAuth requires valid credentials and a Zoom app configured for the service's public URL.
+Users sign in to 2ndBrain normally, connect Zoom in Marketplace (or Settings → Integrations), then install/launch Meeting Minutes from My Workflows. The Zoom connection does not replace the original workspace login. Meeting Minutes shows **Connected through 2ndBrain** and links back to manage the connection. Saving/disconnecting a central connection applies on the next request, without restarting this app.
 
-### Test the deployment locally
+The integration endpoint is derived from the origin of `MARKETPLACE_LAUNCH_VERIFY_URL`: `/api/integrations/zoom/delegate`. It accepts only status, meeting lists, recordings and owned-transcript operations. Zoom credentials, provider tokens and Supabase login sessions never appear in launch URLs or app responses. The central service checks account/installation/session access for each request; access fails closed if verification is unavailable.
 
-With Docker installed, create an ignored `.env.railway` containing the runtime variables above. Use `APP_ORIGIN=http://localhost:3000` for local testing (Zoom OAuth requires an approved public callback URL):
+### Deploy or test
+
+Push the code, connect the repository to Railway, configure the variables above, generate the public domain, and deploy using the default Dockerfile command. Clear obsolete custom start/build commands. A former `/data` volume is not used by the new integration; retain old data separately if you need a migration or rollback.
 
 ```sh
 docker build -t meeting-minutes .
-docker run --rm --name meeting-minutes -p 3000:3000 --env-file .env.railway \
-  --mount type=volume,source=minutes-data,target=/data meeting-minutes
+docker run --rm -p 3000:3000 --env-file .env.railway meeting-minutes
 ```
 
-In another terminal, run `curl --fail http://localhost:3000/api/health`. The workspace requires an AI CUBER session; directly opening `/` without one returns `401`. The named Docker volume survives container removal. For a local production check without Docker:
+Create an ignored `.env.railway` with the variables above. Direct access to `/` without a marketplace session returns `401`. For a local production check:
 
 ```sh
+npm test
 npm run build:railway
 npm run test:deployment
 ```
 
-The deployment smoke check runs the packaged standalone server on a temporary port with a fixture marketplace verifier. It checks health without login, protected routes, a signed marketplace launch, static assets, and SQLite persistence across a server restart. It uses a temporary database and does not contact Zoom or AI CUBER.
-
-Reference: [Railway Dockerfiles](https://docs.railway.com/builds/dockerfiles), [Railway healthchecks](https://docs.railway.com/deployments/healthchecks), and [Next.js standalone output](https://nextjs.org/docs/app/api-reference/config/next-config-js/output).
+The smoke test launches the packaged server against a local HTTPS 2ndBrain fixture and checks login identity, assets, delegation, connection changes without restarting, and logout revocation. It requires `openssl` to generate its temporary test certificate and does not contact the live providers.

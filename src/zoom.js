@@ -157,19 +157,20 @@ export function createZoomFeature({ esc, icon, badge, heading, redraw, toast, im
     const readyTranscripts = state.recordings.some(m => m.files?.some(f => f.status === 'completed'));
     const nextStep = state.statusError ? 'Retry the connection check above to continue.'
       : !status ? 'Checking your Zoom connection…'
-      : !status.configured ? 'Finish the server setup shown above, then check the connection again.'
+      : !status.configured ? 'Connect Zoom in 2ndBrain, then check the connection again.'
       : !status.authenticated ? 'Sign in to this workspace above, then connect your Zoom account.'
-      : !status.connected ? 'Select Connect with Zoom above and approve access. The fetch buttons will then be enabled.'
+      : !status.connected ? 'Connect Zoom in 2ndBrain, then check the connection again. The fetch buttons will then be enabled.'
       : 'Choose a date range and fetch recordings to find available minutes and transcripts.';
     let connection;
     if (state.statusError) connection = `<div class="notice amber">${esc(state.statusError)} <button class="button small" data-zoom-action="status">Retry</button></div>`;
     else if (!status) connection = '<p class="empty">Checking your Zoom connection…</p>';
-    else if (!status.configured) connection = `<section class="panel zoom-connect"><div class="zoom-symbol">${icon('wave')}</div><div>${badge('Setup required', 'amber')}<h2>The site’s Zoom setup needs attention.</h2><p>Creating the app in Zoom is the first step. Its credentials also need to be saved and deployed to this site before you can connect.</p>${status.setupIssues?.length ? `<ul class="zoom-setup-issues">${status.setupIssues.map(issue => `<li>${esc(issue.message)}</li>`).join('')}</ul>` : ''}<a class="button primary" href="/zoom-setup.html" target="_blank" rel="noopener">Open the Zoom setup guide ${icon('external')}</a></div></section>`;
+    else if (!status.configured) connection = `<section class="panel zoom-connect"><div class="zoom-symbol">${icon('wave')}</div><div>${badge('Setup required', 'amber')}<h2>Set up your Zoom app.</h2><p>Configure and connect Zoom in 2ndBrain Marketplace. Your original 2ndBrain login remains unchanged.</p>${status.setupIssues?.length ? `<ul class="zoom-setup-issues">${status.setupIssues.map(issue => `<li>${esc(issue.message)}</li>`).join('')}</ul>` : ''}<a class="button primary" href="/zoom-setup.html" target="_blank" rel="noopener">Open the Zoom setup guide ${icon('external')}</a></div></section>`;
     else if (!status.authenticated) connection = `<section class="panel zoom-connect"><div class="zoom-symbol">${icon('shield')}</div><div><h2>Your meetings belong to your workspace.</h2><p>Sign in to this workspace first, then authorize your own Zoom account. Your connection and imported follow-ups stay separate from other users.</p><a class="button primary" href="${status.signInPath}" target="_top">Sign in to workspace ${icon('arrow')}</a></div></section>`;
-    else if (!status.connected) connection = `<section class="panel zoom-connect"><div class="zoom-symbol">${icon('wave')}</div><div><h2>Bring your Zoom meetings into focus.</h2><p>Authorize read access to your profile, hosted meetings, and cloud recordings. You choose which transcript to bring into the analyzer.</p><form id="zoom-connect" action="/api/zoom/connect" method="post" target="_top"><button class="button primary">Connect with Zoom ${icon('arrow')}</button></form></div></section>`;
-    else connection = `<section class="panel zoom-account"><span class="zoom-symbol">${icon('check')}</span><div><strong>${esc(status.profile.name)}</strong><p>${esc(status.profile.email)}</p></div>${badge('Zoom connected', 'green')}<button class="button" data-zoom-action="disconnect" ${state.busy ? 'disabled' : ''}>Disconnect</button><a class="text-link" href="${status.signOutPath}" target="_top">Sign out</a></section>`;
+    else if (!status.connected) connection = `<section class="panel zoom-connect"><div class="zoom-symbol">${icon('wave')}</div><div><h2>Bring your Zoom meetings into focus.</h2><p>Authorize read access to your profile, hosted meetings, and cloud recordings. You choose which transcript to bring into the analyzer.</p><a class="button primary" href="${esc(status.manageUrl || status.signInPath)}" target="_top">Connect Zoom in 2ndBrain ${icon('arrow')}</a></div></section>`;
+    else connection = `<section class="panel zoom-account"><span class="zoom-symbol">${icon('check')}</span><div><strong>${esc(status.profile.name)}</strong><p>${esc(status.profile.email)}</p></div>${badge('Zoom connected', 'green')}<a class="button" href="${esc(status.manageUrl)}" target="_top">Manage connection</a><a class="text-link" href="${status.signOutPath}" target="_top">Sign out</a></section>`;
+    const settings = status?.manageUrl ? `<section class="panel"><h2>Connected through 2ndBrain</h2><p>Manage Zoom consent, reconnect, or disconnect in your 2ndBrain workspace. Changes apply to the next request without restarting Meeting Minutes.</p><a class="button primary" href="${esc(status.manageUrl)}" target="_top">Manage Zoom in 2ndBrain ${icon('external')}</a></section>` : '';
     const items = canFetch ? (state.tab === 'recordings' ? state.recordings : state.meetings).filter(m => `${m.topic} ${m.id}`.toLocaleLowerCase().includes(state.search.toLocaleLowerCase())) : [];
-    return heading('ZOOM LIBRARY', 'Your meetings. Ready for the next step.', 'Connect your account, browse accessible meetings, and bring a transcript into your analysis.') + connection +
+    return heading('ZOOM LIBRARY', 'Your meetings. Ready for the next step.', 'Connect your account, browse accessible meetings, and bring a transcript into your analysis.') + connection + settings +
       `<div class="cache-toolbar"><button class="button" data-zoom-action="status" ${state.busy ? 'disabled' : ''}>Check connection again</button><a class="text-link" href="#cache">View saved minutes ${icon('arrow')}</a></div>` +
       `<div class="notice zoom-limit">${icon('file')}<div><strong>What Zoom can provide.</strong> Hosted meetings include valid scheduled meetings. Upcoming & invited covers the next 24 hours when available. Cloud history includes retained recordings in your chosen dates; transcripts must have been generated in Zoom. Local recordings and every meeting you attended are not available through this connection.</div></div>` +
       (state.error ? `<div class="notice amber" role="alert">${esc(state.error)}${state.scan && !state.busy && status?.connected ? '<button class="button small" data-zoom-action="resume">Resume search</button>' : ''}</div>` : '') +
@@ -195,11 +196,6 @@ export function createZoomFeature({ esc, icon, badge, heading, redraw, toast, im
     if (action === 'cache-transcripts') await cacheAllTranscripts();
     if (action === 'resume') await scanRecordings(true);
     if (action === 'cancel') { cancel(); state.progress = 'Search stopped. Retrieved results are kept.'; paint(); }
-    if (action === 'disconnect') {
-      if(!confirm('Disconnect Zoom and clear this account’s cached meeting data on this device? Export the cache from Saved library first if you want a copy.'))return;
-      const run = start(); if (!run) return; paint();
-      try { const data = await request('disconnect', { method: 'POST' }); cancel(); state.error = ''; state.progress = ''; if (cacheState.status === 'ready') { await meetingCache.clear(); cacheUpdated(); } toast(data.message); await loadStatus(); } catch (error) { failure(error); } finally { state.busy = false; paint(); }
-    }
     if (action === 'import') {
       const run = start(); if (!run) return; paint();
       try { const data = await pacedRequest('transcript', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ meetingUuid: button.dataset.uuid, fileId: button.dataset.file }), signal: controller.signal }, run); if (run !== generation) return; const text = transcriptToText(data.text);
@@ -208,7 +204,6 @@ export function createZoomFeature({ esc, icon, badge, heading, redraw, toast, im
     }
   }
   async function submit(form) {
-    if (form.id === 'zoom-connect') { HTMLFormElement.prototype.submit.call(form); return; }
     const data = Object.fromEntries(new FormData(form));
     if (form.id === 'zoom-dates') { state.from = data.from; state.to = data.to; await scanRecordings(); }
     if (form.id === 'zoom-search') { state.search = data.search; paint(); }
