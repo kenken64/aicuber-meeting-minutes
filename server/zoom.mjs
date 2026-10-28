@@ -1,4 +1,4 @@
-// Zoom is a data connection. Sites continues to own the visitor's app identity.
+// Zoom is a data connection; the deployment provides the visitor identity.
 const API = 'https://api.zoom.us/v2';
 const CALLBACK = '/api/zoom/callback';
 const STATE_COOKIE = '__Host-minutes-zoom-state';
@@ -171,7 +171,7 @@ export async function handleZoomRequest(request, env, user, fetcher = fetch) {
     if (path === 'webhook') return await webhook(request, env);
     if (path === 'status' && request.method === 'GET') {
       const row = user?.userId && configured(env) ? await connection(env, user.userId) : null;
-      return json({ configured: configured(env), setupIssues: configurationIssues(env), authenticated: !!user?.userId, visitor: user?.userId ? { name: user.displayName || user.email || 'Your workspace', email: user.email || '' } : null, connected: !!row, signInPath: '/signin-with-chatgpt?return_to=%2F%23zoom', signOutPath: '/signout-with-chatgpt?return_to=%2F%23zoom', profile: row ? { name: row.display_name, email: row.email } : null, cacheKey: user?.userId ? await hash('cache:' + user.userId + (row ? ':' + row.zoom_user_id : '')) : null, workspaceKey: row ? await hash(user.userId + ':' + row.zoom_user_id) : null });
+      return json({ configured: configured(env), setupIssues: configurationIssues(env), authenticated: !!user?.userId, visitor: user?.userId ? { name: user.displayName || user.email || 'Your workspace', email: user.email || '' } : null, connected: !!row, signInPath: '/', signOutPath: '/api/2ndbrain/signout', profile: row ? { name: row.display_name, email: row.email } : null, cacheKey: user?.userId ? await hash('cache:' + user.userId + (row ? ':' + row.zoom_user_id : '')) : null, workspaceKey: row ? await hash(user.userId + ':' + row.zoom_user_id) : null });
     }
     if (!configured(env)) throw new ZoomError('The site owner needs to finish the Zoom app setup before accounts can connect.', 503, 'setup_required');
     requireUser(user);
