@@ -128,3 +128,4 @@ input,select,textarea,.filter-bar select{font-size:16px}
 .zoom-library>h2{margin-bottom:6px}
 .zoom-library>.subtle-note{margin-bottom:16px}
 .zoom-library button:disabled,.zoom-library input:disabled{cursor:not-allowed}
+.language-toggle{white-space:nowrap;min-width:70px;justify-content:center}
